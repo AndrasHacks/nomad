@@ -56,7 +56,7 @@ ALL_TARGETS = linux_s390x
 endif
 
 ifeq (Darwin,$(THIS_OS))
-ALL_TARGETS = darwin_amd64
+ALL_TARGETS = darwin_arm64
 endif
 
 ifeq (FreeBSD,$(THIS_OS))

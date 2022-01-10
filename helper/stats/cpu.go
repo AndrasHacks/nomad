@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	multierror "github.com/hashicorp/go-multierror"
 	"github.com/shirou/gopsutil/v3/cpu"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -36,10 +39,10 @@ func Init() error {
 			merrs = multierror.Append(merrs, fmt.Errorf("Unable to determine the number of CPU cores available: %v", err))
 		}
 
-		var cpuInfo []cpu.InfoStat
+		var cpuInfo []InfoStat
 		ctx, cancel := context.WithTimeout(context.Background(), cpuInfoTimeout)
 		defer cancel()
-		if cpuInfo, err = cpu.InfoWithContext(ctx); err != nil {
+		if cpuInfo, err = InfoWithContext(ctx); err != nil {
 			merrs = multierror.Append(merrs, fmt.Errorf("Unable to obtain CPU information: %v", err))
 		}
 
@@ -78,4 +81,61 @@ func CPUModelName() string {
 // TotalTicksAvailable calculates the total Mhz available across all cores
 func TotalTicksAvailable() float64 {
 	return cpuTotalTicks
+}
+
+type InfoStat struct {
+	CPU        int32    `json:"cpu"`
+	VendorID   string   `json:"vendorId"`
+	Family     string   `json:"family"`
+	Model      string   `json:"model"`
+	Stepping   int32    `json:"stepping"`
+	PhysicalID string   `json:"physicalId"`
+	CoreID     string   `json:"coreId"`
+	Cores      int32    `json:"cores"`
+	ModelName  string   `json:"modelName"`
+	Mhz        float64  `json:"mhz"`
+	CacheSize  int32    `json:"cacheSize"`
+	Flags      []string `json:"flags"`
+	Microcode  string   `json:"microcode"`
+}
+
+func InfoWithContext(ctx context.Context) ([]InfoStat, error) {
+	var ret []InfoStat
+
+	c := InfoStat{}
+	c.ModelName, _ = unix.Sysctl("machdep.cpu.brand_string")
+	family, _ := unix.SysctlUint32("machdep.cpu.family")
+	c.Family = strconv.FormatUint(uint64(family), 10)
+	model, _ := unix.SysctlUint32("machdep.cpu.model")
+	c.Model = strconv.FormatUint(uint64(model), 10)
+	stepping, _ := unix.SysctlUint32("machdep.cpu.stepping")
+	c.Stepping = int32(stepping)
+	features, err := unix.Sysctl("machdep.cpu.features")
+	if err == nil {
+		for _, v := range strings.Fields(features) {
+			c.Flags = append(c.Flags, strings.ToLower(v))
+		}
+	}
+	leaf7Features, err := unix.Sysctl("machdep.cpu.leaf7_features")
+	if err == nil {
+		for _, v := range strings.Fields(leaf7Features) {
+			c.Flags = append(c.Flags, strings.ToLower(v))
+		}
+	}
+	extfeatures, err := unix.Sysctl("machdep.cpu.extfeatures")
+	if err == nil {
+		for _, v := range strings.Fields(extfeatures) {
+			c.Flags = append(c.Flags, strings.ToLower(v))
+		}
+	}
+	cores, _ := unix.SysctlUint32("machdep.cpu.core_count")
+	c.Cores = int32(cores)
+	cacheSize, _ := unix.SysctlUint32("machdep.cpu.cache.size")
+	c.CacheSize = int32(cacheSize)
+	c.VendorID, _ = unix.Sysctl("machdep.cpu.vendor")
+
+	cpuFrequency := 3200000000
+	c.Mhz = float64(cpuFrequency) / 1000000.0
+
+	return append(ret, c), nil
 }
